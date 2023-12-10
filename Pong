@@ -1,0 +1,250 @@
+#include <ncurses.h>
+#include <iostream>
+#include <vector>
+
+namespace
+{
+    static constexpr int WINDOW_WIDTH = 80, WINDOW_HEIGHT = 24;
+
+    struct Paddle
+    {
+        static constexpr int height = 5;
+        static constexpr char symbol = '#';
+        int x, y;
+    }
+    left_paddle{4, WINDOW_HEIGHT >> 1}, right_paddle{WINDOW_WIDTH - 5, WINDOW_HEIGHT >> 1};
+
+    struct Ball
+    {
+        static constexpr char symbol = '*';
+        int x, y, dx, dy;
+        short color;  // Warna bola
+    }
+    ball{WINDOW_WIDTH >> 1, WINDOW_HEIGHT >> 1, 1, -1, COLOR_PAIR(1)};  // Warna awal biru
+
+    struct User
+    {
+        std::string username;
+        std::string password;
+        int score;
+
+        User(const std::string& name, const std::string& pass) : username(name), password(pass), score(0) {}
+    };
+
+    std::vector<User> users;
+    User currentUser("", "");  // Inisialisasi dengan user kosong
+
+    WINDOW* window;  // Deklarasi window
+
+    const int MAX_SCORE = 10;  // Skor maksimal yang diperlukan untuk menang
+    int currentScore = 0;      // Skor saat ini
+}
+
+inline bool paddle_ball_collision(Paddle paddle, int fx, int fy) noexcept
+{
+    return fx == paddle.x ?
+               fy >= paddle.y && fy < paddle.y + Paddle::height ?
+               true : false :
+           false;
+}
+
+bool login()
+{
+    std::string username, password;
+    std::cout << "Masukkan nama pengguna: ";
+    std::cin >> username;
+    std::cout << "Masukkan kata sandi: ";
+    std::cin >> password;
+
+    for (const auto& user : users)
+    {
+        if (user.username == username && user.password == password)
+        {
+            currentUser = user;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool showLoginScreen()
+{
+    std::cout << "Selamat datang di Pong!\n";
+
+    while (true)
+    {
+        std::cout << "1. Login\n2. Keluar\n";
+        int choice;
+        std::cin >> choice;
+
+        switch (choice)
+        {
+        case 1:
+            if (login())
+            {
+                std::cout << "Login berhasil!\n";
+                return true;
+            }
+            else
+            {
+                std::cout << "Nama pengguna atau kata sandi tidak valid. Coba lagi.\n";
+            }
+            break;
+        case 2:
+            return false;
+        default:
+            std::cout << "Pilihan tidak valid. Coba lagi.\n";
+        }
+    }
+}
+
+void update_ball() noexcept
+{
+    const auto fx = ball.x + ball.dx;
+    const auto fy = ball.y + ball.dy;
+
+    // Logika untuk menyentuh paddles
+    if (paddle_ball_collision(left_paddle, fx, fy) || paddle_ball_collision(right_paddle, fx, fy))
+    {
+        ball.dx = -ball.dx;
+    }
+
+    // Logika untuk menyentuh dinding atas atau bawah
+    if (fy <= 0 || fy >= WINDOW_HEIGHT - 1)
+    {
+        ball.dy = -ball.dy;
+    }
+
+    // Logika untuk mencetak skor dan menangani game over
+    if (fx <= 0)
+    {
+        currentScore++;
+        ball.x = WINDOW_WIDTH >> 1;
+        ball.y = WINDOW_HEIGHT >> 1;
+
+        if (currentScore >= MAX_SCORE)
+        {
+            // Game over karena pemain menang
+            ::mvprintw(WINDOW_HEIGHT / 2, WINDOW_WIDTH / 2 - 8, "Game Over! Anda Menang!");
+            ::refresh();
+            ::getch();
+            ::endwin();
+            std::exit(0);
+        }
+    }
+    else if (fx >= WINDOW_WIDTH - 1)
+    {
+        // Ball mencapai batas kanan
+        ball.dx = -ball.dx;
+    }
+
+    ball.x += ball.dx;
+    ball.y += ball.dy;
+}
+
+void update_right_paddle() noexcept
+{
+    if (ball.x > right_paddle.x)
+        return;
+
+    const auto fby = ball.y + (right_paddle.x - ball.x) * ball.dy;
+
+    if (fby < 0 || fby >= WINDOW_HEIGHT)
+        return;
+
+    const auto half_paddle_height = Paddle::height >> 1;
+    const auto fpy =
+        right_paddle.y + (ball.y > right_paddle.y + half_paddle_height) -
+        (ball.y < right_paddle.y + half_paddle_height);
+
+    right_paddle.y =
+        fpy ? fpy + Paddle::height == WINDOW_HEIGHT ? right_paddle.y : fpy : right_paddle.y;
+}
+
+void keyboard(WINDOW* window, bool& running) noexcept
+{
+    const int code = ::wgetch(window);
+
+    switch (code)
+    {
+    case 'w':
+        left_paddle.y = left_paddle.y - 1 ? left_paddle.y - 1 : left_paddle.y;
+        break;
+    case 's':
+        left_paddle.y = left_paddle.y + Paddle::height == WINDOW_HEIGHT - 1 ? left_paddle.y : left_paddle.y + 1;
+        break;
+    case 'q':
+        running = false;
+        break;
+    }
+}
+
+void render(WINDOW* window) noexcept
+{
+    ::wclear(window);
+    ::box(window, 0, 0);
+
+    // Warna bola
+    ::attron(ball.color);
+    ::wmove(window, ball.y, ball.x);
+    ::waddch(window, ball.symbol);
+    ::attroff(ball.color);
+
+    for (int i = 0; i < Paddle::height; ++i)
+    {
+        ::wmove(window, left_paddle.y + i, left_paddle.x);
+        ::waddch(window, Paddle::symbol);
+        ::wmove(window, right_paddle.y + i, right_paddle.x);
+        ::waddch(window, Paddle::symbol);
+    }
+
+    // Tampilkan skor
+    ::mvprintw(0, WINDOW_WIDTH / 2 - 5, "Skor: %d", currentScore);
+
+    ::wrefresh(window);
+}
+
+int main()
+{
+    users.push_back(User("player1", "password1"));  // Tambahkan pengguna contoh
+
+    if (showLoginScreen())
+    {
+        if (::initscr())
+        {
+            ::curs_set(0);
+            ::cbreak();
+            ::noecho();
+
+            // Inisialisasi warna
+            ::start_color();
+            ::init_pair(1, COLOR_BLUE, COLOR_BLACK);  // Warna biru untuk bola
+
+            window = ::newwin(WINDOW_HEIGHT, WINDOW_WIDTH, 0, 0);
+            if (window)
+            {
+                ::wtimeout(window, 100);
+
+                bool running = true;
+                while (running)
+                {
+                    ::keyboard(window, running);
+                    ::update_ball();
+                    ::update_right_paddle();
+                    ::render(window);
+                }
+
+                ::delwin(window);
+            }
+            else
+                std::cerr << "Kesalahan pembuatan jendela" << std::endl;
+
+            ::endwin();
+        }
+        else
+            std::cerr << "Kesalahan inisialisasi ncurses" << std::endl;
+    }
+
+    return 0;
+}
